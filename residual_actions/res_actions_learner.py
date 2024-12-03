@@ -1,15 +1,15 @@
-import typing
 import copy
+import logging
+from collections import deque
 
 import torch
-
-from feedback_core.tabula_rasa.external.pisa.sae import PISA
-from feedback_core.tabula_rasa.train_handling import TrainingProcessor
-from feedback_core.tabula_rasa.train_handling import InterProcessQueues, InterProcessSharedDicts
 
 from ._settings import ResidualActionsSettings
 from ._models import MemoryConditionedBehaviorCloning, MemoryModel
 from ._expert_episode import ExpertEpisode
+
+LOGGER = logging.getLogger()
+LOGGER.setLevel(logging.DEBUG)
 
 
 class ResidualActionsLearner:
@@ -17,27 +17,23 @@ class ResidualActionsLearner:
     """
 
     def __init__(self,
-                 train_processor: TrainingProcessor,
-                 autoencoder: PISA,
+                 state_space_size: int,
+                 action_space_size: int,
                  settings: ResidualActionsSettings,
                  device: str):
-        self._train_processor = train_processor
         self._main_device = device
         self.settings = settings
 
-        self.history_elem_count = (self._train_processor.processing_settings.true_history_frame_len //
-                                   self._train_processor.processing_settings.frame_seq_len_screening_rate)
-
         self.memory = MemoryModel(
-            state_space_size=self._train_processor.state_autoencoder_settings.latent_space_size,
-            action_space_size=self._train_processor.inputs_permutations_count,
+            state_space_size=state_space_size,
+            action_space_size=action_space_size,
             hidden_size=settings.hidden_channels_memory,
         ).to(self._main_device)
 
         self.behavior = MemoryConditionedBehaviorCloning(
-            state_space_size=self._train_processor.state_autoencoder_settings.latent_space_size,
+            state_space_size=state_space_size,
             mem_hidden_size=settings.hidden_channels_memory,
-            action_space_size=self._train_processor.inputs_permutations_count,
+            action_space_size=action_space_size,
             curr_hidden_size=settings.hidden_channels_behavior
         ).to(self._main_device)
 
@@ -45,22 +41,18 @@ class ResidualActionsLearner:
             params=list(self.memory.parameters()) + list(self.behavior.parameters()),
             lr=settings.optim_learning_rate)
 
-        self.autoencoder = autoencoder
         self.expert_episode: ExpertEpisode | None = None
 
         self.history_states = torch.zeros(1,
                                           self.settings.history_size,
-                                          self._train_processor.state_autoencoder_settings.latent_space_size)
+                                          state_space_size)
 
     def add_expert_episode(self,
-                           state_mus: torch.Tensor,
-                           state_logsigmas: torch.Tensor,
-                           actions: torch.Tensor,
-                           hyposcene_id: int | None = None,
-                           shared_dicts: InterProcessSharedDicts | None = None) -> None:
+                           states: torch.Tensor,
+                           actions: torch.Tensor) -> None:
         """
-        states_encoded
-            Expected dimensions: (batch, autoencoder_latent_features)
+        states
+            Expected dimensions: (batch, instances, features)
         actions
             Expected dimensions: (batch, binary_multilabel_actions)
 
@@ -73,40 +65,28 @@ class ResidualActionsLearner:
             )
         actions_indices = torch.Tensor(action_indices_list).to(actions.device).to(torch.float32)
 
-        mus_seq = self.make_history_tensor(state_mus)
-        logsigmas_seq = self.make_history_tensor(state_logsigmas)
+        states_seq = self.make_history_tensor(states)
         actions_onehot_seq = self.make_history_tensor(actions).to(torch.float32)
         action_indices_seq = self.make_history_tensor(actions_indices.unsqueeze(-1)).squeeze(-1)
 
-        assert (self._train_processor.processing_settings.true_history_frame_len //
-                self._train_processor.processing_settings.frame_seq_len_screening_rate) >= 2
-
-        action_residuals_last = actions_onehot_seq[:, -1, ...] - actions_onehot_seq[:, -2, ...]
+        action_residuals_last = actions_onehot_seq[:, :, -1, ...] - actions_onehot_seq[:, :, -2, ...]
         action_indices_last = action_indices_seq[..., -1]
 
-        new_episode = ExpertEpisode(state_mus=mus_seq,
-                                    state_logsigmas=logsigmas_seq,
+        new_episode = ExpertEpisode(states=states_seq,
                                     action_residuals=action_residuals_last,
-                                    actions_indices=action_indices_last
-                                    )
+                                    actions_indices=action_indices_last)
         if self.expert_episode is None:
             self.expert_episode = new_episode
         else:
             self.expert_episode = self.expert_episode.concat(new_episode=new_episode)
 
-        if hyposcene_id is not None and shared_dicts is not None:
-            shared_dicts.training_data_sizes_from_training_process[hyposcene_id] = len(self.expert_episode)
         return
 
-    def make_history_tensor(self,
-                            tensor: torch.Tensor) -> torch.Tensor:
-        size = self._train_processor.processing_settings.true_history_frame_len
+    def make_history_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        size = self.settings.history_size
 
-        tensor_seq = tensor.clone().unfold(dimension=0, size=size, step=1)
-        tensor_seq = tensor_seq.permute(0, 2, 1)  # batch, sequence, channels
-
-        if self._train_processor.processing_settings.frame_seq_len_screening_rate != 1:
-            tensor_seq = tensor_seq[:, ::self._train_processor.processing_settings.frame_seq_len_screening_rate, :]
+        tensor_seq = tensor.clone().unfold(dimension=0, size=size, step=1)  # batch, instances, channels, sequence
+        tensor_seq = tensor_seq.permute(0, 1, 3, 2)  # batch, instance, sequence, channels
 
         return tensor_seq
 
@@ -121,7 +101,7 @@ class ResidualActionsLearner:
     def train_epoch(self) -> tuple[float, dict]:
         ep = self.expert_episode
 
-        sample_count = ep.state_mus.shape[0]
+        sample_count = ep.states.shape[0]
         permutation = torch.randperm(sample_count)
 
         epoch_losses: list[float] = []
@@ -130,8 +110,7 @@ class ResidualActionsLearner:
         for i in range(0, sample_count, self.settings.batch_size):
             batch_indices = permutation[i:i + self.settings.batch_size]
 
-            total_input = self.autoencoder.reparametrize(mu=ep.state_mus[batch_indices],
-                                                         logsigma=ep.state_logsigmas[batch_indices])
+            total_input = ep.states[batch_indices]
             actions_residuals = ep.action_residuals[batch_indices]
             actions_indices = ep.actions_indices[batch_indices]
 
@@ -174,18 +153,88 @@ class ResidualActionsLearner:
                                              history=memory_latent.squeeze(0))
         return action_index
 
+    def train_full(self,
+                   running_loss_window_size: int,
+                   log_frequency: int,
+                   target_loss: float,
+                   force_stop_at_plateau_epochs: int,
+                   min_epochs: int,
+                   grace_epochs_after_min_epochs: int,
+                   max_epochs: int | None = None,
+                   ) -> float:
+        loss = torch.tensor(torch.inf)
+        best_running_loss = torch.tensor(torch.inf)
+        best_states: dict[str, dict] = self.get_state_dicts()
+        stop_training = False
+        force_continue_training = False
+        epoch_counter = 0
+        plateau_counter = 0
+
+        learner_name = self.__class__.__name__
+
+        prev_losses = deque(maxlen=running_loss_window_size)
+        while force_continue_training or not stop_training:
+            loss_val, loss_info = self.train_epoch()
+            epoch_counter += 1
+
+            prev_losses.append(loss_val)
+            running_loss = sum(prev_losses) / len(prev_losses)
+
+            if epoch_counter % log_frequency == 0:
+                LOGGER.info(f'{learner_name} training: epoch {epoch_counter}; loss: {round(loss_val, 8)}; '
+                            f'running mean loss of {running_loss_window_size} size: {round(running_loss, 8)}; '
+                            f'\nadditional loss info: {loss_info}.')
+
+            # grace_epochs_after_min_epochs is used so that even if target loss or other condition is reached,
+            #  the training process can still try several epochs for picking best state dict
+            continue_because_min_epochs = epoch_counter < (min_epochs + grace_epochs_after_min_epochs)
+            force_continue_training = continue_because_min_epochs
+            if force_continue_training:
+                # No need to check stop conditions
+                continue
+
+            if epoch_counter > min_epochs:
+                # IMPORTANT: This code only runs when we trained for enough minimum epochs because
+                # for cases when we are finetuning on new data we might accidentally
+                # select a batch with dominantly old data, get low loss on it,
+                # and save it as the best state dict
+                if running_loss < best_running_loss:
+                    plateau_counter = 0
+                    best_running_loss = running_loss
+                    best_states = copy.deepcopy(self.get_state_dicts())
+                else:
+                    plateau_counter += 1
+
+            stop_because_plateau = plateau_counter > force_stop_at_plateau_epochs
+            if stop_because_plateau:
+                LOGGER.info(f"{learner_name} training: plateau reached, running loss: {best_running_loss}")
+
+            stop_because_loss_reached = best_running_loss < target_loss
+            if stop_because_loss_reached:
+                LOGGER.info(
+                    f"{learner_name} training: target loss ({target_loss}) reached, " +
+                    f"running loss: {best_running_loss}")
+
+            if max_epochs is None:
+                stop_because_max_epochs = False
+            else:
+                stop_because_max_epochs = epoch_counter >= max_epochs
+            if stop_because_max_epochs:
+                LOGGER.info(f"{learner_name} training: max epochs ({max_epochs}) reached, " +
+                            f"running loss: {best_running_loss}")
+
+            stop_training = stop_because_plateau or stop_because_loss_reached or stop_because_max_epochs
+
+        self.set_state_dicts(state_dicts=best_states)
+
+        return loss.detach().cpu().item()
+
     def process_and_train_full(self,
-                               state_mus: torch.Tensor,
-                               state_logsigmas: torch.Tensor,
-                               actions_train: torch.Tensor,
-                               hyposcene_id: int | None = None,
-                               interprocess_shared_dicts: InterProcessSharedDicts | None = None,
-                               queues: InterProcessQueues | None = None):
-        self.add_expert_episode(state_mus=state_mus,
-                                state_logsigmas=state_logsigmas,
-                                hyposcene_id=hyposcene_id,
-                                shared_dicts=interprocess_shared_dicts,
+                               states_train: torch.Tensor,
+                               actions_train: torch.Tensor):
+        self.add_expert_episode(states=states_train,
                                 actions=actions_train)
+
         self.train_full(
             running_loss_window_size=self.settings.running_loss_window_size,
             log_frequency=self.settings.train_log_frequency,
@@ -194,5 +243,4 @@ class ResidualActionsLearner:
             min_epochs=self.settings.min_epochs,
             grace_epochs_after_min_epochs=self.settings.grace_epochs_after_min_epochs,
             max_epochs=self.settings.max_epochs,
-            queues=queues
         )
