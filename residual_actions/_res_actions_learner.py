@@ -69,7 +69,7 @@ class ResidualActionsLearner:
         actions_onehot_seq = self.make_history_tensor(actions).to(torch.float32)
         action_indices_seq = self.make_history_tensor(actions_indices.unsqueeze(-1)).squeeze(-1)
 
-        action_residuals_last = actions_onehot_seq[:, :, -1, ...] - actions_onehot_seq[:, :, -2, ...]
+        action_residuals_last = actions_onehot_seq[:, -1, ...] - actions_onehot_seq[:, -2, ...]
         action_indices_last = action_indices_seq[..., -1]
 
         new_episode = ExpertEpisode(states=states_seq,
@@ -126,7 +126,7 @@ class ResidualActionsLearner:
             # TODO: other representation of negated actions
             batch_memory_loss = torch.nn.functional.mse_loss(predicted_residuals, actions_residuals)
 
-            predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, :],
+            predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, ...],
                                                       history=memory_latent)
             batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
 

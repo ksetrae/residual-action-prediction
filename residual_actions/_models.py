@@ -1,5 +1,7 @@
 import torch
 
+from set_transformer.modules import SAB, PMA
+
 
 class MemoryConditionedBehaviorCloning(torch.nn.Module):
     def __init__(self,
@@ -53,8 +55,14 @@ class MemoryEncoder(torch.nn.Module):
                  ):
         super(MemoryEncoder, self).__init__()
 
+        self.instance_encoder = torch.nn.Sequential(
+            SAB(state_space_size, hidden_size, num_heads=1, ln=True),
+            SAB(hidden_size, hidden_size, num_heads=1, ln=True),
+            PMA(hidden_size, num_heads=1, num_seeds=1, ln=True)
+        )
+
         self.encoder_top = torch.nn.Sequential(
-            torch.nn.Linear(state_space_size, hidden_size),
+            torch.nn.Linear(hidden_size, hidden_size),
             torch.nn.ReLU(),
             torch.nn.LayerNorm(hidden_size),
         )
@@ -67,17 +75,24 @@ class MemoryEncoder(torch.nn.Module):
         Parameters
         ----------
         x
-            dimensions: (batch, sequence, features)
+            dimensions: (batch, sequence, instance, features)
 
         Returns
         -------
-
+        x
+            dimensions: (batch, features)
         """
-        assert len(x.shape) == 3
+        assert len(x.shape) == 4
 
-        # res, _ = self.rnn(x)
-        # res = res[:, -1, :]
+        # Treat sequence dimension as batch for the purpose of encoding instances to a flat vector
+        # orig_shape = x.shape
+        x = x.flatten(start_dim=1, end_dim=2)
+        x = self.instance_encoder(x)
+        x = x.squeeze(-1)  # batch, sequence, features
+
         res = self.encoder_top(x)
+
+        # For now simply take the mean over sequence. Could use RNN or attention again.
         res = res.mean(1)
 
         mu = self.encoder_final(res)
