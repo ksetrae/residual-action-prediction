@@ -1,3 +1,8 @@
 torch==2.0.0 --index-url https://download.pytorch.org/whl/cu117
 numpy==1.25.1
 notebook==7.3.0
+
+# for generating expert data and evaluation
+# git clone --recursive https://github.com/DLR-RM/rl-baselines3-zoo
+gymnasium[atari]==1.0.0
+opencv-python==4.10.0.84
