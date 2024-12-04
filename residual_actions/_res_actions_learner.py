@@ -65,7 +65,7 @@ class ResidualActionsLearner:
             )
         actions_indices = torch.Tensor(action_indices_list).to(actions.device).to(torch.float32)
 
-        states_seq = self.make_history_tensor(states)
+        states_seq = self.make_history_tensor_with_instances(states)
         actions_onehot_seq = self.make_history_tensor(actions).to(torch.float32)
         action_indices_seq = self.make_history_tensor(actions_indices.unsqueeze(-1)).squeeze(-1)
 
@@ -83,6 +83,14 @@ class ResidualActionsLearner:
         return
 
     def make_history_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        size = self.settings.history_size
+
+        tensor_seq = tensor.clone().unfold(dimension=0, size=size, step=1)  # batch, channels, sequence
+        tensor_seq = tensor_seq.permute(0, 2, 1)  # batch, sequence, channels
+
+        return tensor_seq
+
+    def make_history_tensor_with_instances(self, tensor: torch.Tensor) -> torch.Tensor:
         size = self.settings.history_size
 
         tensor_seq = tensor.clone().unfold(dimension=0, size=size, step=1)  # batch, instances, channels, sequence
