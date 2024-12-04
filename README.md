@@ -11,3 +11,7 @@ and not even on the same data modality, hence model architecture is different.
 It only follows main ideas of the paper.
 
 Tested with python 3.10, pytorch 2.0
+
+# TODO
+- evaluation, at least on data and env from private repo
+- evaluation on MuJoCo/CARLA (as in the paper)

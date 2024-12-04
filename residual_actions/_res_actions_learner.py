@@ -8,8 +8,9 @@ from ._settings import ResidualActionsSettings
 from ._models import MemoryConditionedBehaviorCloning, MemoryModel
 from ._expert_episode import ExpertEpisode
 
-LOGGER = logging.getLogger()
-LOGGER.setLevel(logging.DEBUG)
+logging.basicConfig()
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
 
 
 class ResidualActionsLearner:
@@ -46,6 +47,7 @@ class ResidualActionsLearner:
         self.history_states = torch.zeros(1,
                                           self.settings.history_size,
                                           state_space_size)
+        LOGGER.info('test')
 
     def add_expert_episode(self,
                            states: torch.Tensor,
@@ -127,7 +129,7 @@ class ResidualActionsLearner:
             batch_memory_loss = torch.nn.functional.mse_loss(predicted_residuals, actions_residuals)
 
             predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, ...],
-                                                      history=memory_latent)
+                                                      history_encoded=memory_latent)
             batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
 
             batch_loss = batch_memory_loss + batch_behavior_loss

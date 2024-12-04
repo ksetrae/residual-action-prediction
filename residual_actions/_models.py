@@ -11,8 +11,22 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
                  action_space_size: int
                  ):
         super(MemoryConditionedBehaviorCloning, self).__init__()
-        self.obs_net = torch.nn.Sequential(
-            torch.nn.Linear(state_space_size, curr_hidden_size),
+        # self.current_observations_processor = torch.nn.Sequential(
+        #     torch.nn.Linear(state_space_size, curr_hidden_size),
+        #     torch.nn.ReLU(),
+        #     torch.nn.LayerNorm(curr_hidden_size),
+        #     torch.nn.Linear(curr_hidden_size, curr_hidden_size),
+        #     torch.nn.ReLU(),
+        #     torch.nn.LayerNorm(curr_hidden_size),
+        # )
+        self.current_observations_processor_instances = torch.nn.Sequential(
+            SAB(state_space_size, curr_hidden_size, num_heads=1, ln=True),
+            SAB(curr_hidden_size, curr_hidden_size, num_heads=1, ln=True),
+            PMA(curr_hidden_size, num_heads=1, num_seeds=1, ln=True),
+        )
+
+        self.current_observations_processor_flat = torch.nn.Sequential(
+            torch.nn.Linear(curr_hidden_size, curr_hidden_size),
             torch.nn.ReLU(),
             torch.nn.LayerNorm(curr_hidden_size),
             torch.nn.Linear(curr_hidden_size, curr_hidden_size),
@@ -20,7 +34,7 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
             torch.nn.LayerNorm(curr_hidden_size),
         )
 
-        self.hist_proc = torch.nn.Sequential(
+        self.history_processor = torch.nn.Sequential(
             torch.nn.Linear(mem_hidden_size, curr_hidden_size),
             torch.nn.ReLU(),
             torch.nn.LayerNorm(curr_hidden_size),
@@ -28,20 +42,35 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
 
         self.joined_net = torch.nn.Linear(curr_hidden_size*2, action_space_size)
 
-    def forward(self, observations_current: torch.Tensor, history: torch.Tensor) -> torch.Tensor:
-        history = self.hist_proc(history)
-        history = history.detach().clone()
+    def forward(self, observations_current: torch.Tensor, history_encoded: torch.Tensor) -> torch.Tensor:
+        """
 
-        observations_current = self.obs_net(observations_current)
+        Parameters
+        ----------
+        observations_current
+            dimensions: (batch, instance, features)
+        history_encoded
+            dimensions: (batch, features)
+        Returns
+        -------
 
-        joined = torch.cat((observations_current, history), dim=-1)
+        """
+
+        history_encoded = self.history_processor(history_encoded)
+        history_encoded = history_encoded.detach().clone()
+
+        observations_current = self.current_observations_processor_instances(observations_current)
+        observations_current = observations_current.squeeze(1)
+        observations_current = self.current_observations_processor_flat(observations_current)
+
+        joined = torch.cat((observations_current, history_encoded), dim=-1)
 
         res = self.joined_net(joined)
         return res
 
     def act(self, observations: torch.Tensor, history: torch.Tensor) -> int:
         with torch.no_grad():
-            action_probability = self.forward(observations_current=observations, history=history)
+            action_probability = self.forward(observations_current=observations, history_encoded=history)
         probs = torch.softmax(action_probability, dim=-1)
         action_distribution = torch.distributions.Categorical(probs)
         action_index = action_distribution.sample().item()
