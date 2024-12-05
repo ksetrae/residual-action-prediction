@@ -47,7 +47,6 @@ class ResidualActionsLearner:
         self.history_states = torch.zeros(1,
                                           self.settings.history_size,
                                           state_space_size)
-        LOGGER.info('test')
 
     def to_inplace(self, device: str):
         self.memory = self.memory.to(device)
