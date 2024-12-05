@@ -66,15 +66,23 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
         joined = torch.cat((observations_current, history_encoded), dim=-1)
 
         res = self.joined_net(joined)
+
+        # for pendulum environment
+        res = (torch.sigmoid(res) - 1) * 4
         return res
 
-    def act(self, observations: torch.Tensor, history: torch.Tensor) -> int:
+    # def act_discrete(self, observations: torch.Tensor, history: torch.Tensor) -> int:
+    #     with torch.no_grad():
+    #         action_probability = self.forward(observations_current=observations, history_encoded=history)
+    #     probs = torch.softmax(action_probability, dim=-1)
+    #     action_distribution = torch.distributions.Categorical(probs)
+    #     action_index = action_distribution.sample().item()
+    #     return action_index
+
+    def act(self, observations: torch.Tensor, history: torch.Tensor) -> float:
         with torch.no_grad():
-            action_probability = self.forward(observations_current=observations, history_encoded=history)
-        probs = torch.softmax(action_probability, dim=-1)
-        action_distribution = torch.distributions.Categorical(probs)
-        action_index = action_distribution.sample().item()
-        return action_index
+            action_cont = self.forward(observations_current=observations, history_encoded=history)
+        return action_cont.item()
 
 
 class MemoryEncoder(torch.nn.Module):

@@ -145,3 +145,4 @@ cython_debug/
 datasets/
 logs/
 rl-baselines3-zoo/
+rl-baselines3-zoo/*

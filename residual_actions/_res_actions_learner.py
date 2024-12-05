@@ -49,6 +49,11 @@ class ResidualActionsLearner:
                                           state_space_size)
         LOGGER.info('test')
 
+    def to_inplace(self, device: str):
+        self.memory = self.memory.to(device)
+        self.behavior = self.behavior.to(device)
+        self.history_states = self.history_states.to(device)
+
     def add_expert_episode(self,
                            states: torch.Tensor,
                            actions: torch.Tensor) -> None:
@@ -124,7 +129,7 @@ class ResidualActionsLearner:
 
             total_input = ep.states[batch_indices]
             actions_residuals = ep.action_residuals[batch_indices]
-            actions_indices = ep.actions_indices[batch_indices]
+            # actions_indices = ep.actions_indices[batch_indices]
 
             predicted_residuals, memory_latent = self.memory.forward(total_input)
             # TODO: other representation of negated actions
@@ -132,7 +137,8 @@ class ResidualActionsLearner:
 
             predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, ...],
                                                       history_encoded=memory_latent)
-            batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
+            # batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
+            batch_behavior_loss = torch.nn.functional.mse_loss(predicted_actions, actions_residuals)
 
             batch_loss = batch_memory_loss + batch_behavior_loss
 
@@ -150,7 +156,7 @@ class ResidualActionsLearner:
         return loss_val, {'memory': sum(epoch_losses_memory) / len(epoch_losses_memory),
                           'behavior': sum(epoch_losses_behavior) / len(epoch_losses_behavior)}
 
-    def act_and_step(self, points: torch.Tensor) -> int:
+    def act_and_step(self, points: torch.Tensor) -> float:
         new_states = self.history_states.clone()
         new_states = torch.roll(input=new_states, dims=1, shifts=-1)
         new_states[0, -1, ...] = points
@@ -161,9 +167,9 @@ class ResidualActionsLearner:
             # memory_latent = self.memory.reparametrize(mu=mu, logsigma=logsigma)
             memory_latent = self.memory.encoder(self.history_states.clone())
 
-            action_index = self.behavior.act(observations=points.squeeze(0),
-                                             history=memory_latent.squeeze(0))
-        return action_index
+            action = self.behavior.act(observations=points.squeeze(0),
+                                       history=memory_latent.squeeze(0))
+        return action
 
     def train_full(self,
                    running_loss_window_size: int,
