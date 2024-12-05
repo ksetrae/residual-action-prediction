@@ -2,6 +2,12 @@ Code implementing ideas from paper named
 **"Resolving Copycat Problems in Visual Imitation Learning via Residual Action Prediction"**
 (https://arxiv.org/abs/2207.09705)
 
+# How to run
+1. Install all libraries as in requirements.txt
+2. run record_expert_data.py
+3. run train_and_eval.ipynb
+
+# Notes
 **Note**: this code is adapted from private repo where it was based on private API, so
 architecture of this API might not be optimal.  
 
@@ -13,5 +19,5 @@ It only follows main ideas of the paper.
 Tested with python 3.10, pytorch 2.0
 
 # TODO
-- evaluation on any data
-- evaluation on MuJoCo/CARLA (as in the paper)
+- compare to behavioral cloning on observation history (BCOH), behavioral cloning from single observation (BCSO) as in the paper
+- evaluation on MuJoCo/CARLA as in the paper
