@@ -1,1 +1,2 @@
+cd rl-baselines3-zoo
 python enjoy.py --algo a2c --env BreakoutNoFrameskip-v4 --folder rl-trained-agents/ -n 5000

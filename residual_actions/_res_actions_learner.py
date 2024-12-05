@@ -54,7 +54,8 @@ class ResidualActionsLearner:
                            actions: torch.Tensor) -> None:
         """
         states
-            Expected dimensions: (batch, instances, features)
+            # Expected dimensions: (batch, instances, features)
+            Expected dimensions: (batch, features)
         actions
             Expected dimensions: (batch, binary_multilabel_actions)
 
@@ -67,7 +68,8 @@ class ResidualActionsLearner:
             )
         actions_indices = torch.Tensor(action_indices_list).to(actions.device).to(torch.float32)
 
-        states_seq = self.make_history_tensor_with_instances(states)
+        # states_seq = self.make_history_tensor_with_instances(states)
+        states_seq = self.make_history_tensor(states)
         actions_onehot_seq = self.make_history_tensor(actions).to(torch.float32)
         action_indices_seq = self.make_history_tensor(actions_indices.unsqueeze(-1)).squeeze(-1)
 

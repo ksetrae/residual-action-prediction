@@ -19,14 +19,14 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
         #     torch.nn.ReLU(),
         #     torch.nn.LayerNorm(curr_hidden_size),
         # )
-        self.current_observations_processor_instances = torch.nn.Sequential(
-            SAB(state_space_size, curr_hidden_size, num_heads=1, ln=True),
-            SAB(curr_hidden_size, curr_hidden_size, num_heads=1, ln=True),
-            PMA(curr_hidden_size, num_heads=1, num_seeds=1, ln=True),
-        )
+        # self.current_observations_processor_instances = torch.nn.Sequential(
+        #     SAB(state_space_size, curr_hidden_size, num_heads=1, ln=True),
+        #     SAB(curr_hidden_size, curr_hidden_size, num_heads=1, ln=True),
+        #     PMA(curr_hidden_size, num_heads=1, num_seeds=1, ln=True),
+        # )
 
         self.current_observations_processor_flat = torch.nn.Sequential(
-            torch.nn.Linear(curr_hidden_size, curr_hidden_size),
+            torch.nn.Linear(state_space_size, curr_hidden_size),
             torch.nn.ReLU(),
             torch.nn.LayerNorm(curr_hidden_size),
             torch.nn.Linear(curr_hidden_size, curr_hidden_size),
@@ -59,8 +59,8 @@ class MemoryConditionedBehaviorCloning(torch.nn.Module):
         history_encoded = self.history_processor(history_encoded)
         history_encoded = history_encoded.detach().clone()
 
-        observations_current = self.current_observations_processor_instances(observations_current)
-        observations_current = observations_current.squeeze(1)
+        # observations_current = self.current_observations_processor_instances(observations_current)
+        # observations_current = observations_current.squeeze(1)
         observations_current = self.current_observations_processor_flat(observations_current)
 
         joined = torch.cat((observations_current, history_encoded), dim=-1)
@@ -84,14 +84,14 @@ class MemoryEncoder(torch.nn.Module):
                  ):
         super(MemoryEncoder, self).__init__()
 
-        self.instance_encoder = torch.nn.Sequential(
-            SAB(state_space_size, hidden_size, num_heads=1, ln=True),
-            SAB(hidden_size, hidden_size, num_heads=1, ln=True),
-            PMA(hidden_size, num_heads=1, num_seeds=1, ln=True)
-        )
+        # self.instance_encoder = torch.nn.Sequential(
+        #     SAB(state_space_size, hidden_size, num_heads=1, ln=True),
+        #     SAB(hidden_size, hidden_size, num_heads=1, ln=True),
+        #     PMA(hidden_size, num_heads=1, num_seeds=1, ln=True)
+        # )
 
         self.encoder_top = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.Linear(state_space_size, hidden_size),
             torch.nn.ReLU(),
             torch.nn.LayerNorm(hidden_size),
         )
@@ -111,13 +111,13 @@ class MemoryEncoder(torch.nn.Module):
         x
             dimensions: (batch, features)
         """
-        assert len(x.shape) == 4
-
-        # Treat sequence dimension as batch for the purpose of encoding instances to a flat vector
-        # orig_shape = x.shape
-        x = x.flatten(start_dim=1, end_dim=2)
-        x = self.instance_encoder(x)
-        x = x.squeeze(-1)  # batch, sequence, features
+        # assert len(x.shape) == 4
+        # # Treat sequence dimension as batch for the purpose of encoding instances to a flat vector
+        # # orig_shape = x.shape
+        # x = x.flatten(start_dim=1, end_dim=2)
+        # x = self.instance_encoder(x)
+        # x = x.squeeze(-1)  # batch, sequence, features
+        assert len(x.shape) == 3
 
         res = self.encoder_top(x)
 

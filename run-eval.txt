@@ -1,0 +1,1 @@
+python train.py --algo a2c --env BreakoutNoFrameskip-v4 --eval-freq 10000 --eval-episodes 10 --n-eval-envs 1
