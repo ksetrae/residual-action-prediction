@@ -1,3 +1,17 @@
 torch==2.0.0 --index-url https://download.pytorch.org/whl/cu117
 numpy==1.25.1
 notebook==7.3.0
+
+# for generating expert data and evaluation
+# first run this, then install other requirements
+# git clone --recursive https://github.com/DLR-RM/rl-baselines3-zoo
+
+gym[atari,accept-rom-license]==0.26.2
+stable-baselines3[extra]>=2.0.0a4
+opencv-python==4.10.0.84
+# gymnasium[atari]==1.0.0
+gymnasium[atari]==1.0.0
+gymnasium[accept-rom-license]==1.0.0
+atari-py==0.2.5
+pybullet_envs_gymnasium>=0.5.0
+matplotlib==3.9.3

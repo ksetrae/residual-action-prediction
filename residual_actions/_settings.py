@@ -16,3 +16,5 @@ class ResidualActionsSettings:
     min_epochs: int
     grace_epochs_after_min_epochs: int
     max_epochs: int | None = None
+
+    learner_state_path: str = 'logs/residual_actions_learner.pth'

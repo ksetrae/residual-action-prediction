@@ -8,8 +8,9 @@ from ._settings import ResidualActionsSettings
 from ._models import MemoryConditionedBehaviorCloning, MemoryModel
 from ._expert_episode import ExpertEpisode
 
-LOGGER = logging.getLogger()
-LOGGER.setLevel(logging.DEBUG)
+logging.basicConfig()
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
 
 
 class ResidualActionsLearner:
@@ -47,12 +48,18 @@ class ResidualActionsLearner:
                                           self.settings.history_size,
                                           state_space_size)
 
+    def to_inplace(self, device: str):
+        self.memory = self.memory.to(device)
+        self.behavior = self.behavior.to(device)
+        self.history_states = self.history_states.to(device)
+
     def add_expert_episode(self,
                            states: torch.Tensor,
                            actions: torch.Tensor) -> None:
         """
         states
-            Expected dimensions: (batch, instances, features)
+            # Expected dimensions: (batch, instances, features)
+            Expected dimensions: (batch, features)
         actions
             Expected dimensions: (batch, binary_multilabel_actions)
 
@@ -65,11 +72,12 @@ class ResidualActionsLearner:
             )
         actions_indices = torch.Tensor(action_indices_list).to(actions.device).to(torch.float32)
 
-        states_seq = self.make_history_tensor_with_instances(states)
+        # states_seq = self.make_history_tensor_with_instances(states)
+        states_seq = self.make_history_tensor(states)
         actions_onehot_seq = self.make_history_tensor(actions).to(torch.float32)
         action_indices_seq = self.make_history_tensor(actions_indices.unsqueeze(-1)).squeeze(-1)
 
-        action_residuals_last = actions_onehot_seq[:, :, -1, ...] - actions_onehot_seq[:, :, -2, ...]
+        action_residuals_last = actions_onehot_seq[:, -1, ...] - actions_onehot_seq[:, -2, ...]
         action_indices_last = action_indices_seq[..., -1]
 
         new_episode = ExpertEpisode(states=states_seq,
@@ -120,15 +128,16 @@ class ResidualActionsLearner:
 
             total_input = ep.states[batch_indices]
             actions_residuals = ep.action_residuals[batch_indices]
-            actions_indices = ep.actions_indices[batch_indices]
+            # actions_indices = ep.actions_indices[batch_indices]
 
             predicted_residuals, memory_latent = self.memory.forward(total_input)
             # TODO: other representation of negated actions
             batch_memory_loss = torch.nn.functional.mse_loss(predicted_residuals, actions_residuals)
 
-            predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, :],
-                                                      history=memory_latent)
-            batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
+            predicted_actions = self.behavior.forward(observations_current=total_input[:, -1, ...],
+                                                      history_encoded=memory_latent)
+            # batch_behavior_loss = torch.nn.functional.cross_entropy(predicted_actions, actions_indices.long())
+            batch_behavior_loss = torch.nn.functional.mse_loss(predicted_actions, actions_residuals)
 
             batch_loss = batch_memory_loss + batch_behavior_loss
 
@@ -146,7 +155,7 @@ class ResidualActionsLearner:
         return loss_val, {'memory': sum(epoch_losses_memory) / len(epoch_losses_memory),
                           'behavior': sum(epoch_losses_behavior) / len(epoch_losses_behavior)}
 
-    def act_and_step(self, points: torch.Tensor) -> int:
+    def act_and_step(self, points: torch.Tensor) -> float:
         new_states = self.history_states.clone()
         new_states = torch.roll(input=new_states, dims=1, shifts=-1)
         new_states[0, -1, ...] = points
@@ -157,9 +166,9 @@ class ResidualActionsLearner:
             # memory_latent = self.memory.reparametrize(mu=mu, logsigma=logsigma)
             memory_latent = self.memory.encoder(self.history_states.clone())
 
-            action_index = self.behavior.act(observations=points.squeeze(0),
-                                             history=memory_latent.squeeze(0))
-        return action_index
+            action = self.behavior.act(observations=points.squeeze(0),
+                                       history=memory_latent.squeeze(0))
+        return action
 
     def train_full(self,
                    running_loss_window_size: int,
