@@ -1,3 +1,4 @@
+import pathlib
 from dataclasses import dataclass
 
 
@@ -18,3 +19,7 @@ class ResidualActionsSettings:
     max_epochs: int | None = None
 
     learner_state_path: str = 'logs/residual_actions_learner.pth'
+
+    def __post_init__(self):
+        p = pathlib.Path(self.learner_state_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
