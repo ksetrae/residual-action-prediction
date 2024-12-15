@@ -1,7 +1,5 @@
 import torch
 
-from set_transformer.modules import SAB, PMA
-
 
 class MemoryConditionedBehaviorCloning(torch.nn.Module):
     def __init__(self,
